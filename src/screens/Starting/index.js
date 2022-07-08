@@ -1,5 +1,5 @@
 import Geolocation from '@react-native-community/geolocation';
-// import ActivityRecognition from 'react-native-activity-recognition';
+import ActivityRecognition from 'react-native-activity-recognition';
 import BackgroundService from 'react-native-background-actions';
 import {API, Auth} from 'aws-amplify';
 import moment from 'moment';
@@ -12,6 +12,8 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
+  ScrollView,
+  Text,
   View,
 } from 'react-native';
 import Ionicon from 'react-native-vector-icons/Ionicons';
@@ -31,7 +33,9 @@ let GeoConfig = {
   maximumAge: 10000,
 };
 const numberOfLines = 5;
-let DefaultActivity = 'STILL';
+let DefaultActivity = 'UNKNOWN';
+let lt = 37.23365833333333;
+let lg = -121.80182333333333;
 
 const options = {
   taskName: 'SXM 360L Tracker',
@@ -46,10 +50,6 @@ const options = {
   parameters: {
     delay: 30000,
   },
-};
-
-let APP_To_Call = () => {
-  console.log('App');
 };
 
 export default function Starting({navigation}) {
@@ -82,6 +82,30 @@ export default function Starting({navigation}) {
       console.log('Fetch Error:', e);
     }
   };
+  const locationWatcher = async () => {
+    const granted = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+      {
+        title: 'Location Access Required',
+        message: 'This App needs to Access your location',
+        buttonNeutral: 'Ask Me Later',
+        buttonNegative: 'Cancel',
+        buttonPositive: 'OK',
+      },
+    );
+    if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+      setInterval(() => {
+        Geolocation.getCurrentPosition(
+          pos => {
+            lt = pos?.coords?.latitude;
+            lg = pos?.coords?.longitude;
+          },
+          error => {},
+          GeoConfig,
+        );
+      }, 5000);
+    }
+  };
 
   const fetchData = async id => {
     try {
@@ -89,8 +113,6 @@ export default function Starting({navigation}) {
         query: queries[queryStr],
         variables: {id},
       });
-      // console.log('User Info', userInfo);
-
       setItems1(
         userInfo.data[queryStr].vehicleinfos.items.map(i => {
           return {
@@ -122,6 +144,8 @@ export default function Starting({navigation}) {
   useEffect(() => {
     checkUser();
     // backAppRunning();
+    locationWatcher();
+    getActivity();
     let unsub = navigation.addListener('focus', () => {
       checkUser();
       // ActivityRecognition.stop();
@@ -133,26 +157,46 @@ export default function Starting({navigation}) {
     };
   }, []);
 
-  // const getActivity = async () => {
-  //   try {
-  //     const detectionIntervalMillis = 1000;
-  //     await ActivityRecognition.start(detectionIntervalMillis);
-  //     const unsubscribe = ActivityRecognition.subscribe(detectedActivities => {
-  //       const mostProbableActivity = detectedActivities.sorted[0];
-  //       console.log('Activity', mostProbableActivity);
-  //       mostProbableActivity.confidence > 75 &&
-  //         setActivity(mostProbableActivity.type);
-  //     });
-  //   } catch (error) {
-  //     Alert.alert('Oops', JSON.stringify(error), [
-  //       {
-  //         text: 'OK',
-  //         onPress: () => {},
-  //       },
-  //     ]);
-  //     console.log('Activity Error', error);
-  //   }
-  // };
+  const getActivity = async () => {
+    console.log('ACT', ActivityRecognition);
+    try {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
+        {
+          title: 'ACTIVITY_RECOGNITION Access Required',
+          message: 'This App needs to Access your ACTIVITY_RECOGNITION',
+          buttonNeutral: 'Ask Me Later',
+          buttonNegative: 'Cancel',
+          buttonPositive: 'OK',
+        },
+      );
+
+      if (granted) {
+        console.log('Starting activity Record');
+        const detectionIntervalMillis = 1000;
+        const unsubscribe = await ActivityRecognition.subscribe(
+          detectedActivities => {
+            console.log('Activity1', detectedActivities);
+            const mostProbableActivity = detectedActivities.sorted[0];
+            console.log('Activity2', mostProbableActivity);
+            DefaultActivity = mostProbableActivity.type;
+            mostProbableActivity.confidence > 25 &&
+              setActivity(mostProbableActivity.type);
+          },
+        );
+        let resp = await ActivityRecognition.start(detectionIntervalMillis);
+        console.log('After Start', resp);
+      }
+    } catch (error) {
+      Alert.alert('Oops', JSON.stringify(error), [
+        {
+          text: 'OK',
+          onPress: () => {},
+        },
+      ]);
+      console.log('Activity Error', error);
+    }
+  };
 
   const backAppRunning = async () => {
     // await BackgroundService.stop();
@@ -174,143 +218,76 @@ export default function Starting({navigation}) {
       return;
     }
     if (!recordActivities) {
-      createTrip();
+      if (Platform.OS !== 'ios') {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: 'Location Access Required',
+            message: 'This App needs to Access your location',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          },
+        );
+        let gFlag = granted === PermissionsAndroid.RESULTS.GRANTED;
+        if (!gFlag) {
+          return;
+        }
+      }
+      createTripWithGeo();
       setRecordActivities(!recordActivities);
       backAppRunning();
     } else {
-      setActivities([]);
+      // setActivities([]);
       setRecordActivities(!recordActivities);
-      await BackgroundService.stop();
       clearInterval(intervalX);
+      await BackgroundService.stop();
     }
   };
   // amplify pull --appId d1hvwuhp47fd9p --envName dev
 
   const createTripWithGeo = async () => {
-    let flag = false;
     const now = new Date();
-    Geolocation.getCurrentPosition(
-      async pos => {
-        let newTrip = {
-          Event: `Recorded Event from ${user['cognito:username']}'s Phone`,
-          Event_Time: now.toISOString(),
-          Latitude: pos?.coords?.latitude,
-          Longitude: pos?.coords?.longitude,
-          Type: 'RECORDING',
-          Notes: 'Recorded Note',
-          Core_Motion: activity,
-        };
-        flag = true;
-        console.log(newTrip);
-        setActivities(act =>
-          act.length > 10
-            ? [
-                `${moment(now).format('L')} ${moment(now).format(
-                  'LT',
-                )} :  (${newTrip.Latitude.toFixed(
-                  5,
-                )}, ${newTrip.Longitude.toFixed(5)})`,
-              ]
-            : [
-                ...act,
-                `${moment(now).format('L')} ${moment(now).format(
-                  'LT',
-                )} :  (${newTrip.Latitude.toFixed(
-                  5,
-                )}, ${newTrip.Longitude.toFixed(5)})`,
-              ],
-        );
 
-        const newTripInfoData = await API.graphql({
-          query: mutations[queryStr1],
-          variables: {input: newTrip},
-        });
+    let newTrip = {
+      Event: `Recorded Event from ${user['cognito:username']}'s Phone`,
+      Event_Time: now.toISOString(),
+      Latitude: lt,
+      Longitude: lg,
+      Type: 'RECORDING',
+      Notes: 'Recorded Note',
+      Core_Motion: DefaultActivity,
+    };
 
-        let newTripVehicleInfo = {
-          vehicleInfoID: value1,
-          tripInfoID: newTripInfoData?.data[queryStr1].id,
-        };
+    setActivities(act => [
+      ...act,
+      `${moment(now).format('L')} ${moment(now).format(
+        'LT',
+      )} : ${DefaultActivity}  (${newTrip.Latitude.toFixed(
+        5,
+      )}, ${newTrip.Longitude.toFixed(5)})`,
+    ]);
+    // console.log(newTrip);
+    // return;
+    const newTripInfoData = await API.graphql({
+      query: mutations[queryStr1],
+      variables: {input: newTrip},
+    });
 
-        const newTripVehicleInfoData = await API.graphql({
-          query: mutations[queryStr2],
-          variables: {input: newTripVehicleInfo},
-        });
-        console.log(newTripVehicleInfoData);
-      },
-      error => {},
-      GeoConfig,
-    );
-    if (!flag) {
-      let newTrip = {
-        Event: `Recorded Event from ${user['cognito:username']}'s Phone`,
-        Event_Time: now.toISOString(),
-        Latitude: 0.66,
-        Longitude: 0.66,
-        Type: 'RECORDING',
-        Notes: 'Recorded Note',
-        Core_Motion: activity,
-      };
-      const newTripInfoData = await API.graphql({
-        query: mutations[queryStr1],
-        variables: {input: newTrip},
-      });
+    let newTripVehicleInfo = {
+      vehicleInfoID: value1,
+      tripInfoID: newTripInfoData?.data[queryStr1].id,
+    };
 
-      let newTripVehicleInfo = {
-        vehicleInfoID: value1,
-        tripInfoID: newTripInfoData?.data[queryStr1].id,
-      };
-
-      const newTripVehicleInfoData = await API.graphql({
-        query: mutations[queryStr2],
-        variables: {input: newTripVehicleInfo},
-      });
-      console.log(newTripVehicleInfoData);
-    }
+    const newTripVehicleInfoData = await API.graphql({
+      query: mutations[queryStr2],
+      variables: {input: newTripVehicleInfo},
+    });
+    console.log(newTripVehicleInfoData);
   };
   const createTrip = async () => {
-    console.log('working');
-
     try {
-      if (Platform.OS === 'ios') {
-        createTripWithGeo();
-      } else {
-        try {
-          const granted = await PermissionsAndroid.request(
-            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-            {
-              title: 'Location Access Required',
-              message: 'This App needs to Access your location',
-              buttonNeutral: 'Ask Me Later',
-              buttonNegative: 'Cancel',
-              buttonPositive: 'OK',
-            },
-          );
-          if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-            console.log('working till here');
-            createTripWithGeo();
-          } else {
-            Alert.alert('Oops', 'Location Permission Denied', [
-              {
-                text: 'OK',
-                onPress: () => {
-                  PermissionsAndroid.request(
-                    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-                    {
-                      title: 'Location Access Required',
-                      message: 'This App needs to Access your location',
-                      buttonNeutral: 'Ask Me Later',
-                      buttonNegative: 'Cancel',
-                      buttonPositive: 'OK',
-                    },
-                  );
-                },
-              },
-            ]);
-          }
-        } catch (err) {
-          console.warn(err);
-        }
-      }
+      createTripWithGeo();
     } catch (error) {
       console.log(error);
     }
@@ -450,13 +427,7 @@ export default function Starting({navigation}) {
                 alignItems: 'center',
                 justifyContent: 'center',
               }}>
-              <Ionicon
-                name="person-outline"
-                size={30}
-                color="#ffffff99"
-
-                // onPress={() => navigation.navigate('Menu')}
-              />
+              <Ionicon name="person-outline" size={30} color="#ffffff99" />
             </View>
             <CustomText fontS={20} m={20} lh={25} style={{paddingTop: 10}}>
               Manage Settings
@@ -464,11 +435,32 @@ export default function Starting({navigation}) {
           </TouchableOpacity>
         </CustomView>
       </CustomView>
-
-      <CustomView f="2">
+      <View
+        style={{
+          flex: 2,
+          borderWidth: StyleSheet.hairlineWidth,
+          width: width - 20,
+          height: 200,
+          padding: 5,
+          margin: 5,
+        }}>
+        <ScrollView style={{flex: 1, padding: 5}}>
+          {activities.map((e, i) => (
+            <Text
+              style={{
+                fontSize: 14,
+                fontWeight: 'bold',
+                color: '#FF3A2F',
+                marginTop: 2,
+              }}>
+              {e}
+            </Text>
+          ))}
+        </ScrollView>
+      </View>
+      {/* <CustomView f="2">
         <TextInput
           style={{
-            borderWidth: StyleSheet.hairlineWidth,
             alignItems: 'flex-start',
             justifyContent: 'flex-start',
             width: width - 20,
@@ -485,7 +477,7 @@ export default function Starting({navigation}) {
           textAlignVertical="top"
           placeholderTextColor="#FF3A2F"
         />
-      </CustomView>
+      </CustomView> */}
     </CustomView>
   );
 }
