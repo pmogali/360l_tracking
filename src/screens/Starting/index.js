@@ -1,9 +1,10 @@
 import Geolocation from '@react-native-community/geolocation';
 import ActivityRecognition from 'react-native-activity-recognition';
 import BackgroundService from 'react-native-background-actions';
-import {API, Auth} from 'aws-amplify';
+import {API, Auth, DataStore} from 'aws-amplify';
 import moment from 'moment';
 import React, {useEffect, useState, useContext} from 'react';
+import {TripInfo, TripInfoVehicleInfo} from '../../models';
 import {
   Alert,
   Image,
@@ -20,9 +21,11 @@ import Ionicon from 'react-native-vector-icons/Ionicons';
 import CustomText from '../../components/CustomText';
 import CustomView from '../../components/CustomView';
 import {width} from '../../constants';
-
 import * as mutations from '../../graphql/mutations';
 import * as queries from '../../graphql/queries';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
+
 const queryStr = 'getUserInfo';
 const queryStr1 = 'createTripInfo';
 const queryStr2 = 'createTripInfoVehicleInfo';
@@ -33,9 +36,10 @@ let GeoConfig = {
   maximumAge: 10000,
 };
 const numberOfLines = 5;
-let DefaultActivity = 'UNKNOWN';
+let DefaultActivity = 'NONE';
 let lt = 37.23365833333333;
 let lg = -121.80182333333333;
+let isOffline = false;
 
 const options = {
   taskName: 'SXM 360L Tracker',
@@ -48,7 +52,7 @@ const options = {
   color: '#ff00ff',
   linkingURI: '',
   parameters: {
-    delay: 30000,
+    delay: 10000,
   },
 };
 
@@ -68,8 +72,16 @@ export default function Starting({navigation}) {
 
   const checkUser = async () => {
     setLoading(true);
+    const unsubscribe = NetInfo.addEventListener(state => {
+      if (state.isConnected) {
+        isOffline = false;
+      } else {
+        isOffline = true;
+      }
+      console.log(isOffline);
+    });
     try {
-      const authUser = await Auth.currentAuthenticatedUser();
+      const authUser = await Auth.currentAuthenticatedUser({bypassCache: true});
       setUser(authUser.signInUserSession.idToken.payload);
       fetchData(authUser.signInUserSession.idToken.payload.sub);
     } catch (e) {
@@ -113,6 +125,23 @@ export default function Starting({navigation}) {
         query: queries[queryStr],
         variables: {id},
       });
+
+      setLoading(false);
+
+      if (!userInfo?.data[queryStr]?.vehicleinfos?.items?.length) {
+        Alert.alert('Lets get started! ', 'Register your vehicle.', [
+          {
+            text: 'Start',
+            onPress: () => {
+              navigation.jumpTo('SettingsStack', {
+                screen: 'Select Vehicle',
+                params: {pageNo: 2},
+              });
+            },
+          },
+        ]);
+      }
+
       setItems1(
         userInfo.data[queryStr].vehicleinfos.items.map(i => {
           return {
@@ -127,8 +156,6 @@ export default function Starting({navigation}) {
           e => e.vehicleInfo?.Selected,
         )?.vehicleInfo.id,
       );
-
-      setLoading(false);
     } catch (e) {
       Alert.alert('Oops', JSON.stringify(e), [
         {
@@ -143,22 +170,28 @@ export default function Starting({navigation}) {
 
   useEffect(() => {
     checkUser();
-    // backAppRunning();
-    locationWatcher();
-    getActivity();
+    Get_All_Permissions();
     let unsub = navigation.addListener('focus', () => {
       checkUser();
-      // ActivityRecognition.stop();
+      Get_All_Permissions();
     });
-
     return () => {
       unsub();
       // clearInterval(intervalX);
     };
   }, []);
 
+  const Get_All_Permissions = async () => {
+    await PermissionsAndroid.requestMultiple([
+      PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+    ]);
+    getActivity();
+    locationWatcher();
+  };
+
   const getActivity = async () => {
-    console.log('ACT', ActivityRecognition);
+    // console.log('ACT', ActivityRecognition);
     try {
       const granted = await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
@@ -171,7 +204,7 @@ export default function Starting({navigation}) {
         },
       );
 
-      if (granted) {
+      if (granted === PermissionsAndroid.RESULTS.GRANTED) {
         console.log('Starting activity Record');
         const detectionIntervalMillis = 1000;
         const unsubscribe = await ActivityRecognition.subscribe(
@@ -180,8 +213,7 @@ export default function Starting({navigation}) {
             const mostProbableActivity = detectedActivities.sorted[0];
             console.log('Activity2', mostProbableActivity);
             DefaultActivity = mostProbableActivity.type;
-            mostProbableActivity.confidence > 25 &&
-              setActivity(mostProbableActivity.type);
+            setActivity(mostProbableActivity.type);
           },
         );
         let resp = await ActivityRecognition.start(detectionIntervalMillis);
@@ -265,15 +297,64 @@ export default function Starting({navigation}) {
         'LT',
       )} : ${DefaultActivity}  (${newTrip.Latitude.toFixed(
         5,
-      )}, ${newTrip.Longitude.toFixed(5)})`,
+      )}, ${newTrip.Longitude.toFixed(5)}) ${isOffline ? '(Cache)' : ''}`,
     ]);
-    // console.log(newTrip);
-    // return;
+
+    // Offline Code ------------------
+    if (isOffline) {
+      const tripsList = await AsyncStorage.getItem('Trips');
+      let trips = tripsList != null ? JSON.parse(tripsList) : [];
+      const newTripInfoData1 = await DataStore.save(new TripInfo(newTrip));
+      const {
+        id,
+        Event,
+        Event_Time,
+        Notes,
+        Latitude,
+        Longitude,
+        Type,
+        Core_Motion,
+      } = newTripInfoData1;
+
+      trips.push({
+        id,
+        Event,
+        Event_Time,
+        Notes,
+        Latitude,
+        Longitude,
+        Type,
+        Core_Motion,
+      });
+      await AsyncStorage.setItem('Trips', JSON.stringify(trips));
+
+      let newTripVehicleInfo1 = {
+        vehicleInfoID: value1,
+        tripInfoID: newTripInfoData1?.id,
+      };
+
+      const newTripVehicleInfoData1 = await DataStore.save(
+        new TripInfoVehicleInfo(newTripVehicleInfo1),
+      );
+
+      const {id: tvId} = newTripVehicleInfoData1;
+
+      const vInfoList = await AsyncStorage.getItem('TripVehicleInfos');
+      let vinfos = vInfoList != null ? JSON.parse(vInfoList) : [];
+      vinfos.push({
+        id: tvId,
+        tripInfoID: newTripVehicleInfoData1.tripInfo.id,
+        vehicleInfoID: newTripVehicleInfoData1.vehicleInfo.id,
+      });
+      await AsyncStorage.setItem('TripVehicleInfos', JSON.stringify(vinfos));
+
+      return;
+    }
+
     const newTripInfoData = await API.graphql({
       query: mutations[queryStr1],
       variables: {input: newTrip},
     });
-
     let newTripVehicleInfo = {
       vehicleInfoID: value1,
       tripInfoID: newTripInfoData?.data[queryStr1].id,
@@ -283,7 +364,16 @@ export default function Starting({navigation}) {
       query: mutations[queryStr2],
       variables: {input: newTripVehicleInfo},
     });
-    console.log(newTripVehicleInfoData);
+
+    const newTripInfoData1 = await DataStore.save(new TripInfo(newTrip));
+    let newTripVehicleInfo1 = {
+      vehicleInfoID: value1,
+      tripInfoID: newTripInfoData1?.id,
+    };
+
+    const newTripVehicleInfoData1 = await DataStore.save(
+      new TripInfoVehicleInfo(newTripVehicleInfo),
+    );
   };
   const createTrip = async () => {
     try {

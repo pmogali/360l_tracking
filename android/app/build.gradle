@@ -131,10 +131,9 @@ def reactNativeArchitectures() {
 }
 
 android {
-    ndkVersion rootProject.ext.ndkVersion
 
-    compileSdkVersion rootProject.ext.compileSdkVersion
 
+    compileSdk compileSdkVersion
     defaultConfig {
         applicationId "com.eventtrackerdemo"
         minSdkVersion rootProject.ext.minSdkVersion

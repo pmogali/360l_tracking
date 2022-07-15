@@ -2,15 +2,14 @@ import React, {useRef, useState, useContext} from 'react';
 import {Alert, View, AppState} from 'react-native';
 import {setJSExceptionHandler} from 'react-native-exception-handler';
 import Navigators from './navigators';
+import {DataStore, Auth, Hub} from 'aws-amplify';
+import {SQLiteAdapter} from '@aws-amplify/datastore-storage-adapter/SQLiteAdapter';
 
-// // ADVANCED use case:
-// const exceptionhandler = (error, isFatal) => {
-//   // your error handler function
-//   console.log('ERRor', error);
-
-//   Alert.alert('Error Native:', JSON.stringify(error));
-// };
-// setJSExceptionHandler(exceptionhandler, true);
+DataStore.configure({
+  storageAdapter: SQLiteAdapter,
+  maxRecordsToSync: 20000,
+  fullSyncInterval: 5,
+});
 
 let intervalX;
 const App = () => {

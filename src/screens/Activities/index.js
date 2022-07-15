@@ -1,8 +1,9 @@
 import Geolocation from '@react-native-community/geolocation';
-import {API, Auth} from 'aws-amplify';
+import {API, Auth, DataStore} from 'aws-amplify';
 import moment from 'moment';
 import React, {useEffect, useState} from 'react';
 import {useForm} from 'react-hook-form';
+import NetInfo from '@react-native-community/netinfo';
 import {
   ActivityIndicator,
   Alert,
@@ -22,8 +23,11 @@ import CustomButton from '../../components/CustomButtonOld';
 import CustomText from '../../components/CustomText';
 import CustomTextInput from '../../components/CustomTextInput';
 import {headerHeight, height, width} from '../../constants';
+import {TripInfo, TripInfoVehicleInfo} from '../../models';
 import * as mutations from '../../graphql/mutations';
 import * as queries from '../../graphql/queries';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 const queryStr = 'getUserInfo';
 const queryStr1 = 'createTripInfo';
 const queryStr2 = 'createTripInfoVehicleInfo';
@@ -130,9 +134,7 @@ const minutes = [
 ];
 const AMPMs = ['AM', 'PM'];
 const numberOfLines = 5;
-
-// createTripInfo(input: {Event: "", Event_Time: "", Latitude: 1.5, Longitude: 1.5, Type: MANUAL, Notes: ""})
-// createTripInfoVehicleInfo(input: {tripInfoID: "", vehicleInfoID: ""})
+let isOffline = false;
 let GeoConfig = {
   enableHighAccuracy: true,
   timeout: 20000,
@@ -208,11 +210,20 @@ export default function Activities({navigation}) {
     setShowCalendar(false);
   };
   const checkUser = async () => {
-    setLoading(true);
+    // StartDataStore();
 
+    const unsubscribe = NetInfo.addEventListener(state => {
+      if (state.isConnected) {
+        isOffline = false;
+      } else {
+        isOffline = true;
+      }
+      console.log(isOffline);
+    });
+    setLoading(true);
     try {
       const authUser = await Auth.currentAuthenticatedUser({bypassCache: true});
-      console.log(authUser);
+      // console.log(authUser);
       setUser(authUser.signInUserSession.idToken.payload);
       fetchData(authUser.signInUserSession.idToken.payload.sub);
       setLoading(false);
@@ -227,7 +238,6 @@ export default function Activities({navigation}) {
         query: queries[queryStr],
         variables: {id},
       });
-
       setItems1(
         userInfo.data[queryStr].vehicleinfos.items.map(i => {
           return {
@@ -236,13 +246,11 @@ export default function Activities({navigation}) {
           };
         }),
       );
-
       setValue1(
         userInfo.data[queryStr].vehicleinfos.items?.find(
           e => e.vehicleInfo?.Selected,
         )?.vehicleInfo.id,
       );
-
       setLoading(false);
     } catch (e) {
       setLoading(false);
@@ -288,64 +296,120 @@ export default function Activities({navigation}) {
     };
   }, []);
 
+  const createTripWithGeo = data => {
+    const now = !!dateToFormat
+      ? new Date(`${dateToFormat} ${valueHH}:${valueMM} ${valueAMPM}`)
+      : new Date();
+    Geolocation.getCurrentPosition(
+      async pos => {
+        let newTrip = {
+          Event: data.Event,
+          Event_Time: now.toISOString(),
+          Latitude: pos?.coords?.latitude,
+          Longitude: pos?.coords?.longitude,
+          Type: 'MANUAL',
+          Notes: note,
+          Core_Motion: '',
+        };
+
+        // Offline Code ------------------
+        if (isOffline) {
+          const tripsList = await AsyncStorage.getItem('Trips');
+          let trips = tripsList != null ? JSON.parse(tripsList) : [];
+          const newTripInfoData1 = await DataStore.save(new TripInfo(newTrip));
+          const {
+            id,
+            Event,
+            Event_Time,
+            Notes,
+            Latitude,
+            Longitude,
+            Type,
+            Core_Motion,
+          } = newTripInfoData1;
+          trips.push({
+            id,
+            Event,
+            Event_Time,
+            Notes,
+            Latitude,
+            Longitude,
+            Type,
+            Core_Motion,
+          });
+          await AsyncStorage.setItem('Trips', JSON.stringify(trips));
+
+          let newTripVehicleInfo1 = {
+            vehicleInfoID: value1,
+            tripInfoID: newTripInfoData1?.id,
+          };
+
+          const newTripVehicleInfoData1 = await DataStore.save(
+            new TripInfoVehicleInfo(newTripVehicleInfo1),
+          );
+
+          const {id: tvId} = newTripVehicleInfoData1;
+          const vInfoList = await AsyncStorage.getItem('TripVehicleInfos');
+          let vinfos = vInfoList != null ? JSON.parse(vInfoList) : [];
+          vinfos.push({
+            id: tvId,
+            tripInfoID: newTripVehicleInfoData1.tripInfo.id,
+            vehicleInfoID: newTripVehicleInfoData1.vehicleInfo.id,
+          });
+          await AsyncStorage.setItem(
+            'TripVehicleInfos',
+            JSON.stringify(vinfos),
+          );
+
+          return Alert.alert('Success', 'Activity added successfully.', [
+            {
+              text: 'OK',
+              onPress: () => {
+                clearData();
+                navigation.navigate('Menu');
+              },
+            },
+          ]);
+        }
+
+        const newTripInfoData = await API.graphql({
+          query: mutations[queryStr1],
+          variables: {input: newTrip},
+        });
+
+        let newTripVehicleInfo = {
+          vehicleInfoID: value1,
+          tripInfoID: newTripInfoData?.data[queryStr1].id,
+        };
+
+        const newTripVehicleInfoData = await API.graphql({
+          query: mutations[queryStr2],
+          variables: {input: newTripVehicleInfo},
+        });
+
+        Alert.alert('Success', 'Activity added successfully.', [
+          {
+            text: 'OK',
+            onPress: () => {
+              clearData();
+              navigation.navigate('Menu');
+            },
+          },
+        ]);
+      },
+      error => {},
+      GeoConfig,
+    );
+  };
   const handleSave = async data => {
-    const {Event} = data;
     if (!items1.length) {
       Alert.alert('', 'Please register atleast one vehicle');
       return;
     }
-
     setLoading2(true);
     try {
-      const now = !!dateToFormat
-        ? new Date(`${dateToFormat} ${valueHH}:${valueMM} ${valueAMPM}`)
-        : new Date();
-
-      console.log('HELLO', now);
       if (Platform.OS === 'ios') {
-        Geolocation.getCurrentPosition(
-          async pos => {
-            let newTrip = {
-              Event,
-              Event_Time: now.toISOString(),
-              Latitude: pos?.coords?.latitude,
-              Longitude: pos?.coords?.longitude,
-              Type: 'MANUAL',
-              Notes: note,
-              Core_Motion: '',
-            };
-
-            // return;
-            const newTripInfoData = await API.graphql({
-              query: mutations[queryStr1],
-              variables: {input: newTrip},
-            });
-
-            console.log(newTripInfoData);
-
-            let newTripVehicleInfo = {
-              vehicleInfoID: value1,
-              tripInfoID: newTripInfoData?.data[queryStr1].id,
-            };
-
-            const newTripVehicleInfoData = await API.graphql({
-              query: mutations[queryStr2],
-              variables: {input: newTripVehicleInfo},
-            });
-            Alert.alert('Success', 'Activity added successfully.', [
-              {
-                text: 'OK',
-                onPress: () => {
-                  clearData();
-                  navigation.navigate('Menu');
-                },
-              },
-            ]);
-            console.log(newTripVehicleInfoData);
-          },
-          error => {},
-          GeoConfig,
-        );
+        createTripWithGeo(data);
       } else {
         try {
           const granted = await PermissionsAndroid.request(
@@ -359,48 +423,7 @@ export default function Activities({navigation}) {
             },
           );
           if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-            Geolocation.getCurrentPosition(
-              async pos => {
-                let newTrip = {
-                  Event,
-                  Event_Time: now.toISOString(),
-                  Latitude: pos?.coords?.latitude,
-                  Longitude: pos?.coords?.longitude,
-                  Type: 'MANUAL',
-                  Notes: note,
-                  Core_Motion: '',
-                };
-
-                const newTripInfoData = await API.graphql({
-                  query: mutations[queryStr1],
-                  variables: {input: newTrip},
-                });
-                console.log(newTripInfoData);
-
-                let newTripVehicleInfo = {
-                  vehicleInfoID: value1,
-                  tripInfoID: newTripInfoData?.data[queryStr1].id,
-                };
-
-                const newTripVehicleInfoData = await API.graphql({
-                  query: mutations[queryStr2],
-                  variables: {input: newTripVehicleInfo},
-                });
-                Alert.alert('Success', 'Activity added successfully.', [
-                  {
-                    text: 'OK',
-                    onPress: () => {
-                      clearData();
-                      navigation.navigate('Menu');
-                    },
-                  },
-                ]);
-
-                console.log(newTripVehicleInfoData);
-              },
-              error => {},
-              GeoConfig,
-            );
+            createTripWithGeo(data);
           } else {
             Alert.alert('Oops', 'Location Permission Denied', [
               {
@@ -436,9 +459,8 @@ export default function Activities({navigation}) {
     setValue1(null);
     onChangeEvent('');
     onChangeNote('');
-
     reset();
-    setLoading(true);
+    // setLoading(true);
   };
 
   if (!!loading) {

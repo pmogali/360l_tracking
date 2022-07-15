@@ -17,12 +17,13 @@ const queryStr1 = 'createVehicleInfoUserInfo';
 const queryStr2 = 'getUserInfo';
 const queryStr3 = 'updateVehicleInfo';
 
-export default function Register({navigation}) {
+export default function Register({route, navigation}) {
   const [page, setPage] = React.useState(1);
   const [items1, setItems1] = React.useState([]);
   const [value1, setValue1] = React.useState('');
   const [open1, setOpen1] = React.useState(false);
   const [loading, setLoading] = useState(true);
+  console.log(route);
 
   const [user, setUser] = useState(null);
   const [btn, setBtn] = useState(1);
@@ -43,6 +44,11 @@ export default function Register({navigation}) {
       unsub();
     };
   }, []);
+  useEffect(() => {
+    if (route.params) {
+      setPage(route.params.pageNo);
+    }
+  }, [route.params]);
 
   const checkUser = async () => {
     setLoading(true);
