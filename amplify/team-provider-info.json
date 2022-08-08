@@ -17,7 +17,8 @@
           "userPoolId": "us-east-1_tiqv194EZ",
           "userPoolName": "marketplace-user-pool-dev",
           "webClientId": "783ju5sbnvi16mm0ac95li2hle",
-          "nativeClientId": "783ju5sbnvi16mm0ac95li2hle"
+          "nativeClientId": "783ju5sbnvi16mm0ac95li2hle",
+          "unauthRoleName": "amplify-marketplaceapp-dev-123914-unauthRole"
         }
       }
     }

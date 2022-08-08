@@ -81,7 +81,7 @@ export default function Starting({navigation}) {
       console.log(isOffline);
     });
     try {
-      const authUser = await Auth.currentAuthenticatedUser({bypassCache: true});
+      const authUser = await Auth.currentAuthenticatedUser();
       setUser(authUser.signInUserSession.idToken.payload);
       fetchData(authUser.signInUserSession.idToken.payload.sub);
     } catch (e) {
@@ -126,8 +126,6 @@ export default function Starting({navigation}) {
         variables: {id},
       });
 
-      setLoading(false);
-
       if (!userInfo?.data[queryStr]?.vehicleinfos?.items?.length) {
         Alert.alert('Lets get started! ', 'Register your vehicle.', [
           {
@@ -156,6 +154,8 @@ export default function Starting({navigation}) {
           e => e.vehicleInfo?.Selected,
         )?.vehicleInfo.id,
       );
+
+      setLoading(false);
     } catch (e) {
       Alert.alert('Oops', JSON.stringify(e), [
         {
@@ -169,12 +169,14 @@ export default function Starting({navigation}) {
   };
 
   useEffect(() => {
-    checkUser();
-    Get_All_Permissions();
+     checkUser();
+     Get_All_Permissions();
+
     let unsub = navigation.addListener('focus', () => {
       checkUser();
       Get_All_Permissions();
     });
+
     return () => {
       unsub();
       // clearInterval(intervalX);
@@ -191,7 +193,7 @@ export default function Starting({navigation}) {
   };
 
   const getActivity = async () => {
-    // console.log('ACT', ActivityRecognition);
+    console.log('ACT', ActivityRecognition);
     try {
       const granted = await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
@@ -297,7 +299,7 @@ export default function Starting({navigation}) {
         'LT',
       )} : ${DefaultActivity}  (${newTrip.Latitude.toFixed(
         5,
-      )}, ${newTrip.Longitude.toFixed(5)}) ${isOffline ? '(Cache)' : ''}`,
+      )}, ${newTrip.Longitude.toFixed(5)})`,
     ]);
 
     // Offline Code ------------------
@@ -315,7 +317,6 @@ export default function Starting({navigation}) {
         Type,
         Core_Motion,
       } = newTripInfoData1;
-
       trips.push({
         id,
         Event,
@@ -338,7 +339,6 @@ export default function Starting({navigation}) {
       );
 
       const {id: tvId} = newTripVehicleInfoData1;
-
       const vInfoList = await AsyncStorage.getItem('TripVehicleInfos');
       let vinfos = vInfoList != null ? JSON.parse(vInfoList) : [];
       vinfos.push({
