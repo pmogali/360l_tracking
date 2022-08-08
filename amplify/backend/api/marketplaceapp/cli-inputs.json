@@ -5,8 +5,10 @@
     "serviceName": "AppSync",
     "gqlSchemaPath": "C:\\Applications\\Mobile\\EventTracker\\EventTrackerDemo\\amplify\\backend\\api\\marketplaceapp\\schema.graphql",
     "defaultAuthType": {
-      "mode": "AMAZON_COGNITO_USER_POOLS",
-      "cognitoUserPoolId": "authmarketplaceapp"
+      "mode": "API_KEY",
+      "expirationTime": 365,
+      "apiKeyExpirationDate": "2023-07-28T14:01:03.077Z",
+      "keyDescription": "key rotation after expiration"
     },
     "conflictResolution": {
       "defaultResolutionStrategy": {
