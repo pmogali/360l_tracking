@@ -1,0 +1,51 @@
+enum TypeEnum {
+  RECORDING
+  MANUAL
+}
+
+type TripInfo @model @auth(rules: [{allow: public}]) {
+  id: ID!
+  Event: String
+  Event_Time: AWSDateTime
+  Notes: String
+  Latitude: Float
+  Longitude: Float
+  Type: TypeEnum
+  File_Location: AWSURL
+  VehicleInfos: [VehicleInfo] @manyToMany(relationName: "TripInfoVehicleInfo")
+  Core_Motion: String
+}
+
+type VehicleInfo @model @auth(rules: [{allow: public}]) {
+  id: ID!
+  VIN: String
+  Year: String
+  Model: String
+  Make: String
+  Trim: String
+  tripinfos: [TripInfo] @manyToMany(relationName: "TripInfoVehicleInfo")
+  UserInfos: [UserInfo] @manyToMany(relationName: "VehicleInfoUserInfo")
+  Selected: Boolean
+}
+
+type UserPreference @model @auth(rules: [{allow: public}]) {
+  id: ID!
+  UserInfos: [UserInfo] @manyToMany(relationName: "UserPreferenceUserInfo")
+  Pref_Key: String
+  Pref_Value: String
+}
+
+type UserInfo @model @auth(rules: [{allow: public}]) {
+  id: ID!
+  Name: String!
+  Titles: String
+  Status: String
+  Email: AWSEmail
+  Password: String
+  Phone: String
+  Last_Update_User: String!
+  Last_Update: AWSDateTime!
+  userpreferences: [UserPreference] @manyToMany(relationName: "UserPreferenceUserInfo")
+  vehicleinfos: [VehicleInfo] @manyToMany(relationName: "VehicleInfoUserInfo")
+}
+ 
